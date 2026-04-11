@@ -1,0 +1,34 @@
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Dependencies / package managers
+node_modules/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Build / cache
+dist/
+build/
+.cache/
+.parcel-cache/
+.vite/
+
+# Coverage
+coverage/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

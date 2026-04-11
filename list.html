@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>列表页</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <aside class="ad-rail ad-rail-left" aria-label="左侧广告位">
+    <a class="ad-slot" href="#" data-ad-slot="L1">广告位 L1</a>
+    <a class="ad-slot" href="#" data-ad-slot="L2">广告位 L2</a>
+    <a class="ad-slot" href="#" data-ad-slot="L3">广告位 L3</a>
+    <a class="ad-slot" href="#" data-ad-slot="L4">广告位 L4</a>
+  </aside>
+  <aside class="ad-rail ad-rail-right" aria-label="右侧广告位">
+    <a class="ad-slot" href="#" data-ad-slot="R1">广告位 R1</a>
+    <a class="ad-slot" href="#" data-ad-slot="R2">广告位 R2</a>
+    <a class="ad-slot" href="#" data-ad-slot="R3">广告位 R3</a>
+    <a class="ad-slot" href="#" data-ad-slot="R4">广告位 R4</a>
+  </aside>
+
+  <header class="top-header">
+    <div class="inner">
+      <div class="brand">
+        <img src="icon.png" alt="78.91vip.tv" class="logo" />
+        <div>
+          <p class="kicker">78.91vip.tv</p>
+          <h1>ph</h1>
+        </div>
+      </div>
+      <div class="top-ticker" id="topTicker" aria-live="polite">
+        <span id="topTickerText">怎么会这样</span>
+      </div>
+      <form class="top-search" id="topSearchForm" role="search">
+        <input id="topSearchInput" type="search" placeholder="搜索关键词" autocomplete="off" />
+        <button id="topSearchClear" class="top-search-clear" type="button" aria-label="清空搜索">×</button>
+      </form>
+    </div>
+  </header>
+
+  <nav class="category-bar" aria-label="分类导航">
+    <div class="inner" id="categoryNav"></div>
+  </nav>
+
+  <main class="inner page-main">
+    <section class="panel" aria-labelledby="listTitle">
+      <div class="panel-head">
+        <h2 id="listTitle">Latest Update</h2>
+      </div>
+      <div class="list-grid" id="listGrid"></div>
+      <div class="pager" id="pager">
+        <button class="pager-btn" id="prevBtn" type="button">上一页</button>
+        <span class="pager-info" id="pageInfo">1 / 1</span>
+        <button class="pager-btn" id="nextBtn" type="button">下一页</button>
+      </div>
+    </section>
+  </main>
+
+  <template id="linkItemTemplate">
+    <a class="list-item" target="_blank" rel="noopener noreferrer">
+      <img class="item-cover" alt="" loading="lazy" referrerpolicy="no-referrer" />
+      <span class="item-tag">PH</span>
+      <span class="item-title"></span>
+      <span class="item-meta"></span>
+    </a>
+  </template>
+
+  <script src="ads.js"></script>
+  <script src="list.js"></script>
+</body>
+</html>
