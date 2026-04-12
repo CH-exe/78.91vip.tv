@@ -27,6 +27,17 @@ const searchList = document.getElementById("searchList");
 
 let allMappedVideos = [];
 
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {
+      // Ignore registration failures.
+    });
+  });
+}
+
 function createLinkItem(item) {
   const node = linkItemTemplate.content.cloneNode(true);
   const link = node.querySelector(".list-item");
@@ -440,4 +451,5 @@ async function init() {
   renderFromKeyword("");
 }
 
+registerServiceWorker();
 init();

@@ -27,6 +27,17 @@ const topSearchClear = document.getElementById("topSearchClear");
 
 let baseSortedVideos = [];
 
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {
+      // Ignore registration failures.
+    });
+  });
+}
+
 const navCategories = [
   { name: "主页", url: "home.html" },
   { name: "最新", url: "list.html?tab=latest" },
@@ -450,4 +461,5 @@ async function init() {
   });
 }
 
+registerServiceWorker();
 init();
