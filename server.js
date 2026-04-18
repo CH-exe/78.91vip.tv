@@ -9,6 +9,16 @@ const HOST = "127.0.0.1";
 const PORT = 8080;
 const ROOT = process.cwd();
 const UAPIS_KEY = process.env.UAPIS_API_KEY || "";
+const SERVER_VIDEO_CACHE_TTL_MS = 20 * 60 * 1000;
+const SERVER_LIVE_CACHE_TTL_MS = 5 * 60 * 1000;
+const serverCache = new Map();
+const CORS_ALLOWED_ORIGINS = new Set([
+  "https://78.91vip.tv",
+  "https://www.78.91vip.tv",
+  "https://api.78.91vip.tv",
+  "http://localhost:8080",
+  "http://127.0.0.1:8080"
+]);
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0";
 
@@ -39,6 +49,58 @@ const MIME = {
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload));
+}
+
+function setCorsHeaders(req, res) {
+  const origin = req.headers.origin || "";
+  if (origin && CORS_ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+}
+
+function cacheGet(key) {
+  return serverCache.get(key) || null;
+}
+
+function cacheSet(key, data, ttlMs) {
+  const entry = {
+    data,
+    expireAt: Date.now() + ttlMs,
+    updatedAt: Date.now()
+  };
+  serverCache.set(key, entry);
+  return entry;
+}
+
+async function fetchWithStaleCache({ key, ttlMs, fetcher }) {
+  const cached = cacheGet(key);
+  if (cached && Date.now() <= cached.expireAt) {
+    return {
+      data: cached.data,
+      cacheStatus: "HIT_FRESH"
+    };
+  }
+
+  try {
+    const freshData = await fetcher();
+    cacheSet(key, freshData, ttlMs);
+    return {
+      data: freshData,
+      cacheStatus: cached ? "MISS_REFRESHED" : "MISS_NEW"
+    };
+  } catch (error) {
+    if (cached) {
+      return {
+        data: cached.data,
+        cacheStatus: "HIT_STALE",
+        staleReason: error.message
+      };
+    }
+    throw error;
+  }
 }
 
 function safeDecode(input) {
@@ -185,7 +247,7 @@ async function fetchUapisVideoList({ mid, ps = 16, pn = 1, orderby = "pubdate", 
     throw new Error("UAPIS response has no videos array");
   }
 
-  return data.videos.map((v) => ({
+  const normalizedVideos = data.videos.map((v) => ({
     aid: v.aid,
     bvid: v.bvid,
     title: v.title,
@@ -193,6 +255,37 @@ async function fetchUapisVideoList({ mid, ps = 16, pn = 1, orderby = "pubdate", 
     play: v.play_count ?? "--",
     pic: v.cover || ""
   }));
+
+  return {
+    total: Number(data?.total || normalizedVideos.length || 0),
+    page: Number(data?.page || pn || 1),
+    size: Number(data?.size || ps || normalizedVideos.length || 1),
+    videos: normalizedVideos
+  };
+}
+
+async function fetchUapisLiveroom({ mid, apiKey = "" }) {
+  const url = new URL("https://uapis.cn/api/v1/social/bilibili/liveroom");
+  url.searchParams.set("mid", String(mid));
+
+  const authKey = apiKey || UAPIS_KEY;
+  const headers = {
+    "User-Agent": UA,
+    "Accept": "application/json, text/plain, */*"
+  };
+  if (authKey) {
+    headers.Authorization = `Bearer ${authKey}`;
+  }
+
+  const response = await fetch(url.toString(), { headers });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const message = data?.message || `HTTP ${response.status}`;
+    throw new Error(`UAPIS liveroom request failed: ${message}`);
+  }
+
+  return data;
 }
 
 function extractBvidFromUrl(url) {
@@ -292,6 +385,14 @@ function extractSpaceMeta(html) {
 }
 
 async function handleApi(req, res, parsedUrl) {
+  setCorsHeaders(req, res);
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   if (parsedUrl.pathname === "/api/bili/space") {
     const mid = parsedUrl.searchParams.get("mid") || "1661441201";
     const url = `https://space.bilibili.com/${mid}/upload/video`;
@@ -329,24 +430,35 @@ async function handleApi(req, res, parsedUrl) {
 
     if (mode === "uapis" || mode === "auto") {
       try {
-        const list = await fetchUapisVideoList({
-          mid,
-          ps,
-          pn,
-          orderby,
-          keywords,
-          apiKey: apiKeyFromQuery
+        const cacheKey = `videos:${mid}:${ps}:${pn}:${orderby}:${keywords || ""}`;
+        const cachedResult = await fetchWithStaleCache({
+          key: cacheKey,
+          ttlMs: SERVER_VIDEO_CACHE_TTL_MS,
+          fetcher: async () => fetchUapisVideoList({
+            mid,
+            ps,
+            pn,
+            orderby,
+            keywords,
+            apiKey: apiKeyFromQuery
+          })
         });
+        const pageData = cachedResult.data;
         sendJson(res, 200, {
           ok: true,
           mode,
           source: "uapis",
+          cacheStatus: cachedResult.cacheStatus,
+          cacheTtlMs: SERVER_VIDEO_CACHE_TTL_MS,
+          staleReason: cachedResult.staleReason || null,
           mid,
-          page: pn,
-          count: list.length,
+          page: pageData.page,
+          size: pageData.size,
+          total: pageData.total,
+          count: pageData.videos.length,
           userAgent: UA,
           hasApiKey: Boolean(apiKeyFromQuery || UAPIS_KEY),
-          videos: list
+          videos: pageData.videos
         });
         return;
       } catch (error) {
@@ -409,6 +521,47 @@ async function handleApi(req, res, parsedUrl) {
           apiError,
           headlessError
         }
+      });
+      return;
+    }
+  }
+
+  if (parsedUrl.pathname === "/api/bili/liveroom") {
+    const mid = parsedUrl.searchParams.get("mid") || "1661441201";
+    const apiKeyFromQuery = parsedUrl.searchParams.get("apiKey") || "";
+
+    try {
+      const cacheKey = `liveroom:${mid}`;
+      const cachedResult = await fetchWithStaleCache({
+        key: cacheKey,
+        ttlMs: SERVER_LIVE_CACHE_TTL_MS,
+        fetcher: async () => fetchUapisLiveroom({
+          mid,
+          apiKey: apiKeyFromQuery
+        })
+      });
+      const data = cachedResult.data;
+
+      sendJson(res, 200, {
+        ok: true,
+        source: "uapis",
+        cacheStatus: cachedResult.cacheStatus,
+        cacheTtlMs: SERVER_LIVE_CACHE_TTL_MS,
+        staleReason: cachedResult.staleReason || null,
+        mid,
+        userAgent: UA,
+        hasApiKey: Boolean(apiKeyFromQuery || UAPIS_KEY),
+        ...data
+      });
+      return;
+    } catch (error) {
+      sendJson(res, 502, {
+        ok: false,
+        source: "uapis",
+        mid,
+        userAgent: UA,
+        hasApiKey: Boolean(apiKeyFromQuery || UAPIS_KEY),
+        error: error.message
       });
       return;
     }

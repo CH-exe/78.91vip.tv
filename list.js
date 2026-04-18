@@ -1,11 +1,12 @@
 const TARGET_MID = "1661441201";
 const UAPIS_API_KEY = "";
 const CACHE_KEY = `uapis-cache:${TARGET_MID}`;
-const CACHE_TTL_MS = 10 * 60 * 1000;
+const CACHE_TTL_MS = 20 * 60 * 1000;
 const ONLINE_CACHE_KEY = `uapis-live-cache:${TARGET_MID}`;
-const ONLINE_CACHE_TTL_MS = 1 * 60 * 1000;
+const ONLINE_CACHE_TTL_MS = 5 * 60 * 1000;
 const PAGE_SIZE = 20;
 const TICKER_TEXTS = ["怎么会这样", "你是给", "78.91vip.tv", "窑子开张了"];
+const API_ORIGIN = "https://api.78.91vip.tv";
 
 const query = new URLSearchParams(location.search);
 const currentTab = query.get("tab") || "latest";
@@ -57,6 +58,10 @@ function clearNode(node) {
   }
 }
 
+function buildApiCandidates(pathWithQuery) {
+  return [`${API_ORIGIN}${pathWithQuery}`, pathWithQuery];
+}
+
 function normalizeVideo(video) {
   return {
     aid: video.aid,
@@ -85,7 +90,8 @@ function parsePlayValue(play) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function loadCachedVideos() {
+function loadCachedVideos(options = {}) {
+  const allowExpired = Boolean(options.allowExpired);
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) {
@@ -94,7 +100,10 @@ function loadCachedVideos() {
     const parsed = JSON.parse(raw);
     const expireAt = Number(parsed?.expireAt || 0);
     const videos = parsed?.videos;
-    if (!Array.isArray(videos) || Date.now() > expireAt) {
+    if (!Array.isArray(videos)) {
+      return [];
+    }
+    if (!allowExpired && Date.now() > expireAt) {
       return [];
     }
     return videos;
@@ -154,7 +163,8 @@ function createLinkItem(item) {
   return node;
 }
 
-function loadCachedOnlineStatus() {
+function loadCachedOnlineStatus(options = {}) {
+  const allowExpired = Boolean(options.allowExpired);
   try {
     const raw = localStorage.getItem(ONLINE_CACHE_KEY);
     if (!raw) {
@@ -162,7 +172,10 @@ function loadCachedOnlineStatus() {
     }
     const parsed = JSON.parse(raw);
     const expireAt = Number(parsed?.expireAt || 0);
-    if (Date.now() > expireAt || !parsed?.data) {
+    if (!parsed?.data) {
+      return null;
+    }
+    if (!allowExpired && Date.now() > expireAt) {
       return null;
     }
     return parsed.data;
@@ -233,22 +246,37 @@ function initSearch() {
 }
 
 async function fetchLiveRoomStatus(mid) {
-  const url = `https://uapis.cn/api/v1/social/bilibili/liveroom?mid=${encodeURIComponent(mid)}`;
-  const response = await fetch(url, {
-    cache: "no-store",
-    headers: UAPIS_API_KEY ? { Authorization: `Bearer ${UAPIS_API_KEY}` } : {}
-  });
+  const sameOriginUrl = `/api/bili/liveroom?mid=${encodeURIComponent(mid)}`;
+  const directUrl = `https://uapis.cn/api/v1/social/bilibili/liveroom?mid=${encodeURIComponent(mid)}`;
 
-  // Based on observed behavior, offline may return 404 from this API.
-  if (response.status === 404) {
-    return { live_status: 0 };
+  const plans = [
+    ...buildApiCandidates(sameOriginUrl).map((url) => ({ url, headers: {} })),
+    { url: directUrl, headers: UAPIS_API_KEY ? { Authorization: `Bearer ${UAPIS_API_KEY}` } : {} }
+  ];
+
+  for (const plan of plans) {
+    try {
+      const response = await fetch(plan.url, {
+        cache: "no-store",
+        headers: plan.headers
+      });
+
+      // Based on observed behavior, offline may return 404 from this API.
+      if (response.status === 404) {
+        return { live_status: 0 };
+      }
+
+      if (!response.ok) {
+        continue;
+      }
+
+      return response.json();
+    } catch {
+      // Try next endpoint.
+    }
   }
 
-  if (!response.ok) {
-    throw new Error(`Liveroom request failed: ${response.status}`);
-  }
-
-  return response.json();
+  throw new Error("All liveroom endpoints failed");
 }
 
 function renderOnlineState(liveData) {
@@ -292,15 +320,30 @@ function renderOnlineState(liveData) {
 }
 
 async function fetchUapisPage(mid, pn = 1, ps = 50) {
-  const uapisUrl = `https://uapis.cn/api/v1/social/bilibili/archives?mid=${encodeURIComponent(mid)}&ps=${encodeURIComponent(ps)}&pn=${encodeURIComponent(pn)}&orderby=pubdate`;
-  const response = await fetch(uapisUrl, {
-    cache: "no-store",
-    headers: UAPIS_API_KEY ? { Authorization: `Bearer ${UAPIS_API_KEY}` } : {}
-  });
-  if (!response.ok) {
-    throw new Error(`UAPIS page request failed: ${response.status}`);
+  const sameOriginUrl = `/api/bili/videos?mid=${encodeURIComponent(mid)}&ps=${encodeURIComponent(ps)}&pn=${encodeURIComponent(pn)}&orderby=pubdate&mode=uapis`;
+  const directUrl = `https://uapis.cn/api/v1/social/bilibili/archives?mid=${encodeURIComponent(mid)}&ps=${encodeURIComponent(ps)}&pn=${encodeURIComponent(pn)}&orderby=pubdate`;
+
+  const plans = [
+    ...buildApiCandidates(sameOriginUrl).map((url) => ({ url, headers: {} })),
+    { url: directUrl, headers: UAPIS_API_KEY ? { Authorization: `Bearer ${UAPIS_API_KEY}` } : {} }
+  ];
+
+  for (const plan of plans) {
+    try {
+      const response = await fetch(plan.url, {
+        cache: "no-store",
+        headers: plan.headers
+      });
+      if (!response.ok) {
+        continue;
+      }
+      return response.json();
+    } catch {
+      // Try next endpoint.
+    }
   }
-  return response.json();
+
+  throw new Error("All archives endpoints failed");
 }
 
 function dedupeVideos(videos) {
@@ -317,7 +360,7 @@ function dedupeVideos(videos) {
   return out;
 }
 
-async function fetchAllVideos(mid, pageSize = 50) {
+async function fetchUapisAllVideos(mid, pageSize = 50) {
   const firstPage = await fetchUapisPage(mid, 1, pageSize);
   const firstVideos = Array.isArray(firstPage?.videos) ? firstPage.videos.map(normalizeVideo) : [];
   const total = Number(firstPage?.total || firstVideos.length || 0);
@@ -338,6 +381,51 @@ async function fetchAllVideos(mid, pageSize = 50) {
   }
 
   return dedupeVideos(allVideos);
+}
+
+async function fetchAllVideos(mid, pageSize = 50) {
+  try {
+    const uapisVideos = await fetchUapisAllVideos(mid, pageSize);
+    if (uapisVideos.length) {
+      return uapisVideos;
+    }
+  } catch {
+    // Fall through to backup sources.
+  }
+
+  const directUrl = `https://api.bilibili.com/x/space/arc/search?mid=${mid}&pn=1&ps=${pageSize}&index=1&order=pubdate`;
+  const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`;
+
+  const requestPlan = [
+    { url: directUrl, headers: {} },
+    { url: proxyUrl, headers: {} }
+  ];
+
+  for (const plan of requestPlan) {
+    try {
+      const response = await fetch(plan.url, {
+        cache: "no-store",
+        headers: plan.headers
+      });
+      if (!response.ok) {
+        continue;
+      }
+      const json = await response.json();
+
+      if (Array.isArray(json?.videos) && json.videos.length > 0) {
+        return dedupeVideos(json.videos.map(normalizeVideo));
+      }
+
+      const list = json?.data?.list?.vlist;
+      if (Array.isArray(list) && list.length > 0) {
+        return dedupeVideos(list.map(normalizeVideo));
+      }
+    } catch {
+      // Try next endpoint.
+    }
+  }
+
+  return [];
 }
 
 function buildSortedVideos(videos, tab) {
@@ -419,9 +507,14 @@ async function init() {
       saveCachedOnlineStatus(liveData);
       renderOnlineState(liveData);
     } catch {
-      const fallback = { live_status: 0 };
-      saveCachedOnlineStatus(fallback);
-      renderOnlineState(fallback);
+      const staleLive = loadCachedOnlineStatus({ allowExpired: true });
+      if (staleLive) {
+        renderOnlineState(staleLive);
+      } else {
+        const fallback = { live_status: 0 };
+        saveCachedOnlineStatus(fallback);
+        renderOnlineState(fallback);
+      }
     }
     return;
   }
@@ -434,6 +527,10 @@ async function init() {
     if (videos.length) {
       saveCachedVideos(videos);
     }
+  }
+
+  if (!videos.length) {
+    videos = loadCachedVideos({ allowExpired: true });
   }
 
   const sortedVideos = buildSortedVideos(videos, currentTab);

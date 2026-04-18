@@ -1,9 +1,10 @@
 const TARGET_MID = "1661441201";
 const UAPIS_API_KEY = "";
 const CACHE_KEY = `uapis-cache:${TARGET_MID}`;
-const CACHE_TTL_MS = 10 * 60 * 1000;
+const CACHE_TTL_MS = 20 * 60 * 1000;
 const TICKER_TEXTS = ["怎么会这样", "你是给", "78.91vip.tv", "窑子开张了"];
 const LOCAL_GUESS_COVERS = Array.from({ length: 10 }, (_, idx) => `${idx + 1}.png`);
+const API_ORIGIN = "https://api.78.91vip.tv";
 
 const navCategories = [
   { name: "主页", url: "home.html" },
@@ -63,6 +64,10 @@ function clearNode(node) {
   while (node.firstChild) {
     node.removeChild(node.firstChild);
   }
+}
+
+function buildApiCandidates(pathWithQuery) {
+  return [`${API_ORIGIN}${pathWithQuery}`, pathWithQuery];
 }
 
 function buildVideoUrl(video) {
@@ -276,7 +281,8 @@ function parsePlayValue(play) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function loadCachedVideos() {
+function loadCachedVideos(options = {}) {
+  const allowExpired = Boolean(options.allowExpired);
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) {
@@ -285,7 +291,10 @@ function loadCachedVideos() {
     const parsed = JSON.parse(raw);
     const expireAt = Number(parsed?.expireAt || 0);
     const videos = parsed?.videos;
-    if (!Array.isArray(videos) || Date.now() > expireAt) {
+    if (!Array.isArray(videos)) {
+      return [];
+    }
+    if (!allowExpired && Date.now() > expireAt) {
       return [];
     }
     return videos;
@@ -318,15 +327,30 @@ function normalizeVideo(video) {
 }
 
 async function fetchUapisPage(mid, pn = 1, ps = 50) {
-  const uapisUrl = `https://uapis.cn/api/v1/social/bilibili/archives?mid=${encodeURIComponent(mid)}&ps=${encodeURIComponent(ps)}&pn=${encodeURIComponent(pn)}&orderby=pubdate`;
-  const response = await fetch(uapisUrl, {
-    cache: "no-store",
-    headers: UAPIS_API_KEY ? { Authorization: `Bearer ${UAPIS_API_KEY}` } : {}
-  });
-  if (!response.ok) {
-    throw new Error(`UAPIS page request failed: ${response.status}`);
+  const sameOriginUrl = `/api/bili/videos?mid=${encodeURIComponent(mid)}&ps=${encodeURIComponent(ps)}&pn=${encodeURIComponent(pn)}&orderby=pubdate&mode=uapis`;
+  const directUrl = `https://uapis.cn/api/v1/social/bilibili/archives?mid=${encodeURIComponent(mid)}&ps=${encodeURIComponent(ps)}&pn=${encodeURIComponent(pn)}&orderby=pubdate`;
+
+  const plans = [
+    ...buildApiCandidates(sameOriginUrl).map((url) => ({ url, headers: {} })),
+    { url: directUrl, headers: UAPIS_API_KEY ? { Authorization: `Bearer ${UAPIS_API_KEY}` } : {} }
+  ];
+
+  for (const plan of plans) {
+    try {
+      const response = await fetch(plan.url, {
+        cache: "no-store",
+        headers: plan.headers
+      });
+      if (!response.ok) {
+        continue;
+      }
+      return response.json();
+    } catch {
+      // Try next endpoint.
+    }
   }
-  return response.json();
+
+  throw new Error("All archives endpoints failed");
 }
 
 function dedupeVideos(videos) {
@@ -433,6 +457,10 @@ async function init() {
     if (videos.length) {
       saveCachedVideos(videos);
     }
+  }
+
+  if (!videos.length) {
+    videos = loadCachedVideos({ allowExpired: true });
   }
 
   if (!videos.length) {
