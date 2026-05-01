@@ -3,7 +3,7 @@ const UAPIS_API_KEY = "";
 const CACHE_KEY = `uapis-cache:${TARGET_MID}`;
 const CACHE_TTL_MS = 20 * 60 * 1000;
 const TICKER_TEXTS = ["怎么会这样", "你是给", "78.91vip.tv", "窑子开张了"];
-const LOCAL_GUESS_COVERS = Array.from({ length: 10 }, (_, idx) => `${idx + 1}.png`);
+const LOCAL_GUESS_COVERS = Array.from({ length: 25 }, (_, idx) => `${idx + 1}.png`);
 const API_ORIGIN = "https://api.78.91vip.tv";
 
 const navCategories = [
@@ -163,8 +163,8 @@ function applyGuessCoverOverrides(items) {
   }
 
   const output = items.map((item) => ({ ...item }));
-  const minReplace = Math.min(4, output.length);
-  const maxReplace = Math.min(8, output.length, LOCAL_GUESS_COVERS.length);
+  const minReplace = Math.min(6, output.length);
+  const maxReplace = Math.min(10, output.length, LOCAL_GUESS_COVERS.length);
   const replaceCount = maxReplace > minReplace
     ? Math.floor(Math.random() * (maxReplace - minReplace + 1)) + minReplace
     : maxReplace;
